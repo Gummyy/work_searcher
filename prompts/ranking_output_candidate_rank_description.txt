@@ -1,0 +1,1 @@
+Measures how well the candidate's profile fits the job offering. A high score means the candidate's skills, experience, educational background, and qualifications closely match the role's requirements and responsibilities. A low score means there are significant gaps between what the job demands and what the candidate can bring.

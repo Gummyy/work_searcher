@@ -1,0 +1,8 @@
+## Job Offering
+{job_offering}
+
+## Candidate Profile
+{profile}
+
+## Candidate Preferences
+{preferences}

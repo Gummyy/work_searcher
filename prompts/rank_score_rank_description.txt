@@ -1,0 +1,1 @@
+Numeric score from 0 (no fit at all) to 100 (perfect fit)
