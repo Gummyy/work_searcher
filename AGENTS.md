@@ -180,7 +180,7 @@ except PermissionError:
 
 ### Module structure
 
-- Each directory should have an `__init__.py` file
+- Each directory under the `./src` directory should have an `__init__.py` file
 - Related functionality goes in the same directory
 - Use `types.py` files for type definitions within each module
 - Keep files focused on a single concern
@@ -200,7 +200,7 @@ except PermissionError:
 
 ### Test organization
 
-- All tests go in the `tests/` directory
+- All tests go in the `src/tests/` directory
 - Test files must be named `test_<feature>.py`
 - Test functions must be named `test_<specific_behavior>`
 - Use fixtures for common setup/teardown
