@@ -1,5 +1,8 @@
 ## Job Offering
-{job_offering}
+{job_description}
+
+## Available Document Categories
+{document_categories}
 
 ## Candidate Profile
 {profile}

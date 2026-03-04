@@ -1,8 +1,10 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
+
+from config.types import APICalls, DocumentCategory
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
@@ -49,20 +51,45 @@ class RankingOutput(BaseModel):
     )
 
 
+class JobRow(BaseModel):
+    """Minimal representation of a jobspy DataFrame row needed for scraping.
+
+    Attributes:
+        site (str): Job board identifier (e.g. 'linkedin', 'indeed').
+        job_url (str): Direct URL to the job listing page.
+    """
+
+    site: str
+    job_url: str
+
+
+class ScoringInput(BaseModel):
+    """Structured input fed to the LLM for a single job scoring request.
+
+    Attributes:
+        job_description (str): LLM-ready formatted description produced by the scraper.
+        profile (str): Raw text of the candidate's profile.
+        preferences (str): Raw text of the candidate's job preferences.
+        document_categories (list[DocumentCategory]): Available resume/cover letter
+            categories with their domain descriptions.
+    """
+
+    job_description: str
+    profile: str
+    preferences: str
+    document_categories: list[DocumentCategory]
+
+
 class SingleJobState(TypedDict):
     """State for the single-job scoring agent.
 
     Attributes:
-        job_offering (str): Raw text of the job offering being evaluated.
-        profile (str): Raw text of the candidate's profile.
-        preferences (str): Raw text of the candidate's job preferences.
+        scoring_input (ScoringInput): All data required by the LLM to score one job.
         ranking (RankingOutput | None): Structured output produced by the
             scoring model. None until the scoring step runs.
     """
 
-    job_offering: str
-    profile: str
-    preferences: str
+    scoring_input: ScoringInput
     ranking: Optional[RankingOutput]
 
 
@@ -72,13 +99,22 @@ class PipelineState(TypedDict):
     Attributes:
         profile (str): Raw text of the candidate's profile.
         preferences (str): Raw text of the candidate's job preferences.
-        api_data (dict[str, Any]): Data fetched from external APIs (e.g. job
-            boards), keyed by source name. Empty until the fetch step runs.
-        rankings (list[RankingOutput]): One ranking per job offering scored.
-            Empty until the score_all step runs.
+        document_categories (list[DocumentCategory]): Document category descriptors
+            built from config before entering the pipeline.
+        api_calls (list[APICalls]): Configured API descriptors used to fetch
+            job offerings. Populated at invocation.
+        job_rows (list[JobRow]): Minimal job records (site + url) after the
+            jobspy fetch step. Empty until fetch_jobs_node runs.
+        job_descriptions (list[str]): LLM-ready strings produced by the scrapers,
+            one per successfully scraped job. Empty until scrape_node runs.
+        rankings (list[RankingOutput]): One ranking per scored job offering.
+            Empty until score_all_node runs.
     """
 
     profile: str
     preferences: str
-    api_data: dict[str, Any]
+    document_categories: list[DocumentCategory]
+    api_calls: list[APICalls]
+    job_rows: list[JobRow]
+    job_descriptions: list[str]
     rankings: list[RankingOutput]
