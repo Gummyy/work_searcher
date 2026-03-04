@@ -1,4 +1,51 @@
 {
-    "system": {}
-
+    "profile": {
+        "file": "profile.odt"
+    },
+    "preferences": {
+        "file": "preferences.odt"
+    },
+    "documents": [
+        {
+            "category": "data",
+            "description": "Big data, data pipelines, data engineering, data science, data analytics, data visualization",
+            "resume": {
+                "file": "data_resume.odt"
+            },
+            "cover_letter": {
+                "file": "data_cover_letter.odt"
+            }
+        },
+        {
+            "category": "software",
+            "description": "Software development, software engineering, programming, coding, software design, software architecture",
+            "resume": {
+                "file": "software_resume.odt"
+            },
+            "cover_letter": {
+                "file": "software_cover_letter.odt"
+            }
+        },
+        {
+            "category": "AI",
+            "description": "Artificial intelligence, machine learning, deep learning, neural networks, natural language processing, computer vision",
+            "resume": {
+                "file": "ai_resume.odt"
+            },
+            "cover_letter": {
+                "file": "ai_cover_letter.odt"
+            }
+        }
+    ],
+    "api_calls": [
+        {
+            "tool": "jobspy",
+            "args": {
+                "site_name": ["linkedin", "indeed", "glassdoor"],
+                "search_terms": ["data scientist", "software engineer", "AI researcher"],
+                "location": "Lyon, Auvergne-Rhône-Alpes, France",
+                "hours_old": 24
+            }
+        }
+    ]
 }
