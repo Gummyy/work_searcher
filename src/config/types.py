@@ -67,18 +67,6 @@ class FileOrContent(BaseModel):
         return self
 
 
-class DocumentCategory(BaseModel):
-    """Lightweight descriptor for a document category passed to the LLM.
-
-    Attributes:
-        category (str): Short label identifying the job domain.
-        description (str): Human-readable description of the job domain.
-    """
-
-    category: str
-    description: str
-
-
 class Document(BaseModel):
     """A categorized document bundle pairing a resume and cover letter for a job domain.
 
@@ -296,3 +284,18 @@ class Config(BaseModel):
     preferences: FileOrContent
     documents: list[Document]
     api_calls: Optional[list[APICalls]] = None
+
+    @model_validator(mode="after")
+    def validate_document_categories(self) -> "Config":
+        """Validates that document categories are unique across the documents list.
+
+        Raises:
+            ValueError: If duplicate categories are found.
+
+        Returns:
+            Config: The validated Config instance.
+        """
+        categories = [doc.category for doc in self.documents]
+        if len(categories) != len(set(categories)):
+            raise ValueError("Document categories must be unique across documents.")
+        return self

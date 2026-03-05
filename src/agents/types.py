@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from config.types import APICalls, DocumentCategory
+from config.types import APICalls, Document
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
@@ -70,7 +70,7 @@ class ScoringInput(BaseModel):
         job_description (str): LLM-ready formatted description produced by the scraper.
         profile (str): Raw text of the candidate's profile.
         preferences (str): Raw text of the candidate's job preferences.
-        document_categories (list[DocumentCategory]): Available resume/cover letter
+        document_categories (list[Document]): Available resume/cover letter
             categories with their domain descriptions.
     """
 
@@ -99,7 +99,7 @@ class PipelineState(TypedDict):
     Attributes:
         profile (str): Raw text of the candidate's profile.
         preferences (str): Raw text of the candidate's job preferences.
-        document_categories (list[DocumentCategory]): Document category descriptors
+        document_categories (list[Document]): Document category descriptors
             built from config before entering the pipeline.
         api_calls (list[APICalls]): Configured API descriptors used to fetch
             job offerings. Populated at invocation.
@@ -113,7 +113,7 @@ class PipelineState(TypedDict):
 
     profile: str
     preferences: str
-    document_categories: list[DocumentCategory]
+    document_categories: list[Document]
     api_calls: list[APICalls]
     job_rows: list[JobRow]
     job_descriptions: list[str]
