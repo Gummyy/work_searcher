@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Optional
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from typing_extensions import TypedDict
 
 from config.types import APICalls, Document
@@ -46,7 +46,12 @@ class RankingOutput(BaseModel):
     )
     offering_rank: RankScore = Field(
         description=(
-            _PROMPTS_DIR / "ranking_output_offering_rank_description.txt"
+            _PROMPTS_DIR / "ranking_output_offering_rank_description.md"
+        ).read_text(encoding="utf-8")
+    )
+    related_category: str = Field(
+        description=(
+            _PROMPTS_DIR / "ranking_output_related_category_description.md"
         ).read_text(encoding="utf-8")
     )
 
@@ -60,6 +65,26 @@ class JobRow(BaseModel):
     """
 
     site: str
+    job_url: str
+
+
+class ParsedJob(BaseModel):
+    """A fully parsed job offering ready for scoring and output writing.
+
+    Produced either by the scraper (from a live URL) or by parsing a local
+    job file whose name follows the '$COMPANY__$JOB_TITLE.ext' convention.
+
+    Attributes:
+        company (str): Company name.
+        job_title (str): Job title.
+        job_description (str): LLM-ready formatted job description text.
+        job_url (str): URL of the job listing, or the local file path when
+            sourced from --job_path.
+    """
+
+    company: str
+    job_title: str
+    job_description: str
     job_url: str
 
 
@@ -77,20 +102,7 @@ class ScoringInput(BaseModel):
     job_description: str
     profile: str
     preferences: str
-    document_categories: list[DocumentCategory]
-
-
-class SingleJobState(TypedDict):
-    """State for the single-job scoring agent.
-
-    Attributes:
-        scoring_input (ScoringInput): All data required by the LLM to score one job.
-        ranking (RankingOutput | None): Structured output produced by the
-            scoring model. None until the scoring step runs.
-    """
-
-    scoring_input: ScoringInput
-    ranking: Optional[RankingOutput]
+    document_categories: list[Document]
 
 
 class PipelineState(TypedDict):
@@ -102,11 +114,13 @@ class PipelineState(TypedDict):
         document_categories (list[Document]): Document category descriptors
             built from config before entering the pipeline.
         api_calls (list[APICalls]): Configured API descriptors used to fetch
-            job offerings. Populated at invocation.
-        job_rows (list[JobRow]): Minimal job records (site + url) after the
-            jobspy fetch step. Empty until fetch_jobs_node runs.
-        job_descriptions (list[str]): LLM-ready strings produced by the scrapers,
-            one per successfully scraped job. Empty until scrape_node runs.
+            job offerings. Empty when job_rows or parsed_jobs are pre-populated.
+        out_dir (Path): Directory where output folders and the summary ODS are
+            written.
+        job_rows (list[JobRow]): Minimal job records (site + url). Pre-populated
+            when --job_url is used; otherwise filled by fetch_jobs_node.
+        parsed_jobs (list[ParsedJob]): Full job records. Pre-populated when
+            --job is used; otherwise filled by scrape_node.
         rankings (list[RankingOutput]): One ranking per scored job offering.
             Empty until score_all_node runs.
     """
@@ -115,6 +129,38 @@ class PipelineState(TypedDict):
     preferences: str
     document_categories: list[Document]
     api_calls: list[APICalls]
+    out_dir: Path
     job_rows: list[JobRow]
-    job_descriptions: list[str]
+    parsed_jobs: list[ParsedJob]
     rankings: list[RankingOutput]
+
+
+def build_ranking_output(scoring_input: ScoringInput) -> type[BaseModel]:
+    """Builds a RankingOutput object with a related_category key where the LLM chooses the relevant documents
+    associated with the job_offering. The type built in this function ensures that only existing categories mentioned
+    in the document_categories list of the ScoringInput can be chosen by the LLM.
+
+    Args:
+        scoring_input (ScoringInput): The structured LLM input for one job, containing the document categories.
+
+    Returns:
+        BaseModel: The BaseModel object with the related_category key added to the candidate_rank and offering_rank fields.
+    """
+    literal_categories = tuple(
+        set([dc.category for dc in scoring_input.document_categories])
+    )
+
+    related_categories = Literal[literal_categories]
+
+    return create_model(
+        "RankingOutputWithRelatedCategory",
+        candidate_rank=(RankScore, Field(...)),
+        offering_rank=(RankScore, Field(...)),
+        related_category=(
+            related_categories,
+            Field(
+                None,
+                description="The document category most relevant to the job offering, chosen from the provided document categories.",
+            ),
+        ),
+    )
