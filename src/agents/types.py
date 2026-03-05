@@ -20,12 +20,12 @@ class RankScore(BaseModel):
     rank: int = Field(
         ge=0,
         le=100,
-        description=(_PROMPTS_DIR / "rank_score_rank_description.txt").read_text(
+        description=(_PROMPTS_DIR / "rank_score_rank_description.md").read_text(
             encoding="utf-8"
         ),
     )
     explanation: str = Field(
-        description=(_PROMPTS_DIR / "rank_score_explanation_description.txt").read_text(
+        description=(_PROMPTS_DIR / "rank_score_explanation_description.md").read_text(
             encoding="utf-8"
         )
     )
@@ -41,7 +41,7 @@ class RankingOutput(BaseModel):
 
     candidate_rank: RankScore = Field(
         description=(
-            _PROMPTS_DIR / "ranking_output_candidate_rank_description.txt"
+            _PROMPTS_DIR / "ranking_output_candidate_rank_description.md"
         ).read_text(encoding="utf-8")
     )
     offering_rank: RankScore = Field(

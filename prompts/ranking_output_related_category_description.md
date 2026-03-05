@@ -1,0 +1,2 @@
+The category which best describes the job offering, chosen amongst the ones described by the user.
+This category determines which cover letter and resume the user should chose to apply to the job offering.

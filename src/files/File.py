@@ -6,7 +6,7 @@ from typing import Any
 from odf import text, teletype
 from odf.opendocument import load
 
-PLAIN_TEXT_EXTENSIONS = {".txt", ".rtf"}
+PLAIN_TEXT_EXTENSIONS = {".txt", ".rtf", ".md"}
 ODF_EXTENSIONS = {".odt", ".ods", ".odp", ".odg", ".odc", ".odf", ".odi", ".odm"}
 
 
@@ -32,7 +32,7 @@ def read_file_content(file_path: str) -> str:
     """Reads a file and returns its text content.
 
     The reading strategy is determined by the file extension:
-    - Plain text formats (.txt, .rtf) are read directly as UTF-8 text.
+    - Plain text formats (.txt, .rtf, .md) are read directly as UTF-8 text.
     - ODF formats (.odt, .ods, .odp, .odg, .odc, .odf, .odi, .odm) are
       parsed with odfpy and their text paragraphs are extracted.
 
