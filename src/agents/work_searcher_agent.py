@@ -1,31 +1,30 @@
-import os
-import shutil
-import subprocess
 import time
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, StateGraph
-from odf import teletype, text
-from odf.opendocument import OpenDocumentSpreadsheet, OpenDocumentText, load
-from odf.table import Table, TableRow, TableCell
 
 from agents.types import (
     JobRow,
     ParsedJob,
     PipelineState,
-    RankingOutput,
     ScoringInput,
     build_ranking_output,
+)
+from agents.work_searcher_actions import (
+    SCORING_SYSTEM_PROMPT,
+    build_scoring_user_message,
+    copy_or_write,
+    dest_name,
+    rewrite_last_paragraph,
+    write_summary_ods,
 )
 from apis.jobspy import fetch_jobs
 from apis.scraping.base_scraper import BaseScraper
 from apis.scraping.indeed_scraper import IndeedScraper
 from apis.scraping.linkedin_scraper import LinkedinScraper
-from config.types import FileOrContent
-from files.File import ODF_EXTENSIONS
+from files.File import convert_to_pdf
 from logger import logger
 
 _MAX_FETCH_RETRIES: int = 3
@@ -40,40 +39,6 @@ _SCRAPER_MAP: dict[str, type[BaseScraper]] = {
     "indeed": IndeedScraper,
     "linkedin": LinkedinScraper,
 }
-
-# Maps URL hostname substrings to the corresponding _SCRAPER_MAP key.
-_URL_SITE_MAP: dict[str, str] = {
-    "indeed.com": "indeed",
-    "linkedin.com": "linkedin",
-}
-
-_PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
-_SCORING_SYSTEM_PROMPT = (_PROMPTS_DIR / "scoring_system_prompt.md").read_text(
-    encoding="utf-8"
-)
-_SCORING_USER_MESSAGE_TEMPLATE = (
-    _PROMPTS_DIR / "scoring_user_message_template.md"
-).read_text(encoding="utf-8")
-
-
-def _build_scoring_user_message(scoring_input: ScoringInput) -> str:
-    """Formats a ScoringInput into a single user message string.
-
-    Args:
-        scoring_input (ScoringInput): The structured LLM input for one job.
-
-    Returns:
-        str: A formatted prompt string combining all scoring input fields.
-    """
-    document_categories_text = "\n".join(
-        f"- {dc.category}: {dc.description}" for dc in scoring_input.document_categories
-    )
-    return _SCORING_USER_MESSAGE_TEMPLATE.format(
-        job_description=scoring_input.job_description,
-        document_categories=document_categories_text,
-        profile=scoring_input.profile,
-        preferences=scoring_input.preferences,
-    )
 
 
 def build_pipeline_graph(model_name: str = "llama3") -> StateGraph:
@@ -212,8 +177,8 @@ def build_pipeline_graph(model_name: str = "llama3") -> StateGraph:
                 build_ranking_output(scoring_input)
             )
             messages = [
-                ("system", _SCORING_SYSTEM_PROMPT),
-                ("human", _build_scoring_user_message(scoring_input)),
+                ("system", SCORING_SYSTEM_PROMPT),
+                ("human", build_scoring_user_message(scoring_input)),
             ]
             for attempt in range(1, _MAX_LLM_RETRIES + 1):
                 try:
@@ -262,20 +227,20 @@ def build_pipeline_graph(model_name: str = "llama3") -> StateGraph:
                 )
                 continue
 
-            resume_dest = job_dir / _dest_name(doc.resume, "resume")
-            _copy_or_write(doc.resume, resume_dest)
-            _convert_to_pdf(resume_dest)
+            resume_dest = job_dir / dest_name(doc.resume, "resume")
+            copy_or_write(doc.resume, resume_dest)
+            convert_to_pdf(resume_dest)
 
-            cover_dest = job_dir / _dest_name(doc.cover_letter, "cover_letter")
-            _copy_or_write(doc.cover_letter, cover_dest)
-            _rewrite_last_paragraph(cover_dest, parsed_job.job_description, model_name)
-            _convert_to_pdf(cover_dest)
+            cover_dest = job_dir / dest_name(doc.cover_letter, "cover_letter")
+            copy_or_write(doc.cover_letter, cover_dest)
+            rewrite_last_paragraph(cover_dest, parsed_job.job_description, model_name)
+            convert_to_pdf(cover_dest)
 
             logger.info(
                 f"Output written for '{parsed_job.company}__{parsed_job.job_title}'."
             )
 
-        _write_summary_ods(out_dir, state["parsed_jobs"], state["rankings"])
+        write_summary_ods(out_dir, state["parsed_jobs"], state["rankings"])
         return state
 
     graph = StateGraph(PipelineState)
@@ -296,230 +261,3 @@ def build_pipeline_graph(model_name: str = "llama3") -> StateGraph:
     graph.add_edge("score_all", "write_output")
     graph.add_edge("write_output", END)
     return graph.compile()
-
-
-def _dest_name(doc_field: FileOrContent, fallback_stem: str) -> str:
-    """Returns the destination filename for a document field.
-
-    Args:
-        doc_field (FileOrContent): The document source.
-        fallback_stem (str): Name stem to use when no source file path exists.
-
-    Returns:
-        str: The destination filename.
-    """
-    if doc_field.file is not None:
-        return Path(doc_field.file).name
-    return f"{fallback_stem}.odt"
-
-
-def _copy_or_write(doc_field: FileOrContent, dest_path: Path) -> None:
-    """Copies a source file or writes raw content to the destination path.
-
-    Args:
-        doc_field (FileOrContent): The document source.
-        dest_path (Path): Destination file path.
-    """
-    if doc_field.file is not None:
-        shutil.copy2(doc_field.file, dest_path)
-    else:
-        doc = OpenDocumentText()
-        p = text.P(text=doc_field.content)
-        doc.text.addElement(p)
-        doc.save(str(dest_path))
-
-
-def _rewrite_last_paragraph(
-    cover_path: Path, job_description: str, model_name: str
-) -> None:
-    """Rewrites the last non-empty paragraph of a cover letter file using an LLM.
-
-    For ODT files, edits the document in-place using odfpy. For plain text
-    files, replaces the last non-empty line in-place.
-
-    Args:
-        cover_path (Path): Path to the cover letter file to edit.
-        job_description (str): Job description passed as context to the LLM.
-        model_name (str): Ollama model identifier to use for the rewrite.
-    """
-    llm = ChatOllama(model=model_name)
-
-    if cover_path.suffix.lower() in ODF_EXTENSIONS:
-        doc = load(str(cover_path))
-        paragraphs = doc.getElementsByType(text.P)
-        last_p = next(
-            (p for p in reversed(paragraphs) if teletype.extractText(p).strip()),
-            None,
-        )
-        if last_p is None:
-            return
-        new_text = _call_rewrite_llm(llm, job_description, teletype.extractText(last_p))
-        for child in list(last_p.childNodes):
-            last_p.removeChild(child)
-        last_p.addText(new_text)
-        doc.save(str(cover_path))
-    else:
-        lines = cover_path.read_text(encoding="utf-8").split("\n")
-        last_idx = next(
-            (i for i in reversed(range(len(lines))) if lines[i].strip()),
-            None,
-        )
-        if last_idx is None:
-            return
-        lines[last_idx] = _call_rewrite_llm(llm, job_description, lines[last_idx])
-        cover_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _call_rewrite_llm(
-    llm: ChatOllama, job_description: str, last_paragraph: str
-) -> str:
-    """Calls the LLM to rewrite a cover letter closing paragraph.
-
-    Args:
-        llm (ChatOllama): The LLM instance to use.
-        job_description (str): The job description for context.
-        last_paragraph (str): The current closing paragraph to rewrite.
-
-    Returns:
-        str: The rewritten paragraph text.
-    """
-    # TODO: move to a dedicated prompt file in prompts/ when content is finalised.
-    message = (
-        f"Job description:\n{job_description}\n\n"
-        f"Current closing paragraph:\n{last_paragraph}\n\n"
-        "Rewrite this closing paragraph to express genuine and specific interest "
-        "in this company and role. Keep it concise and professional. "
-        "Return only the rewritten paragraph text, without any preamble."
-    )
-    return llm.invoke([("human", message)]).content
-
-
-def _convert_to_pdf(file_path: Path) -> None:
-    """Converts a file to PDF using LibreOffice in headless mode.
-
-    Reads the LibreOffice executable path from the LIBREOFFICE_PATH environment
-    variable. If the variable is not set, a warning is logged and the conversion
-    is skipped. Set LIBREOFFICE_PATH in a .env file or your shell environment:
-      - Windows example: C:\\Program Files\\LibreOffice\\program\\soffice.exe
-      - Unix example:    libreoffice
-
-    Args:
-        file_path (Path): Path to the file to convert. The resulting PDF is
-            placed in the same directory.
-
-    Raises:
-        subprocess.CalledProcessError: If LibreOffice exits with a non-zero
-            return code.
-    """
-    libreoffice_path = os.environ.get("LIBREOFFICE_PATH")
-    if not libreoffice_path:
-        logger.warning(
-            "LIBREOFFICE_PATH is not set — skipping PDF conversion for '%s'.",
-            file_path.name,
-        )
-        return
-    try:
-        subprocess.run(
-            [
-                libreoffice_path,
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(file_path.parent),
-                str(file_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        logger.info("Converted '%s' to PDF.", file_path.name)
-    except subprocess.CalledProcessError as e:
-        logger.error("PDF conversion failed for '%s': %s", file_path.name, e.stderr)
-
-
-def _write_summary_ods(
-    out_dir: Path, parsed_jobs: list[ParsedJob], rankings: list[RankingOutput]
-) -> None:
-    """Writes a summary ODS spreadsheet with one row per ranked job.
-
-    Columns: job_title (A), company (B), job_url (C), candidate_rank (D),
-    candidate_explanation (E), offering_rank (F), offering_explanation (G),
-    related_category (H), final_rank (I, formula: =0.5*(D{row}+F{row})).
-    The file is named '{DATETIME}_summary.ods' and placed directly in out_dir.
-
-    Args:
-        out_dir (Path): Directory to write the ODS file to.
-        parsed_jobs (list[ParsedJob]): Ordered list of parsed job records.
-        rankings (list[RankingOutput]): Ordered list of ranking results
-            matching parsed_jobs.
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    doc = OpenDocumentSpreadsheet()
-    table = Table(name="Summary")
-
-    headers = [
-        "job_title",
-        "company",
-        "job_url",
-        "candidate_rank",
-        "candidate_explanation",
-        "offering_rank",
-        "offering_explanation",
-        "related_category",
-        "final_rank",
-    ]
-    header_row = TableRow()
-    for h in headers:
-        cell = TableCell(valuetype="string", stringvalue=h)
-        cell.addElement(text.P(text=h))
-        header_row.addElement(cell)
-    table.addElement(header_row)
-
-    for row_idx, (parsed_job, ranking) in enumerate(
-        zip(parsed_jobs, rankings), start=2
-    ):
-        data_row = TableRow()
-
-        for val in [parsed_job.job_title, parsed_job.company, parsed_job.job_url]:
-            cell = TableCell(valuetype="string", stringvalue=str(val))
-            cell.addElement(text.P(text=str(val)))
-            data_row.addElement(cell)
-
-        data_row.addElement(
-            TableCell(valuetype="float", value=str(ranking.candidate_rank.rank))
-        )
-
-        cell = TableCell(
-            valuetype="string", stringvalue=ranking.candidate_rank.explanation
-        )
-        cell.addElement(text.P(text=ranking.candidate_rank.explanation))
-        data_row.addElement(cell)
-
-        data_row.addElement(
-            TableCell(valuetype="float", value=str(ranking.offering_rank.rank))
-        )
-
-        cell = TableCell(
-            valuetype="string", stringvalue=ranking.offering_rank.explanation
-        )
-        cell.addElement(text.P(text=ranking.offering_rank.explanation))
-        data_row.addElement(cell)
-
-        cell = TableCell(valuetype="string", stringvalue=ranking.related_category)
-        cell.addElement(text.P(text=ranking.related_category))
-        data_row.addElement(cell)
-
-        final_rank = 0.5 * (ranking.candidate_rank.rank + ranking.offering_rank.rank)
-        data_row.addElement(
-            TableCell(
-                valuetype="float",
-                formula=f"of:=0.5*(D{row_idx}+F{row_idx})",
-                value=str(final_rank),
-            )
-        )
-
-        table.addElement(data_row)
-
-    doc.spreadsheet.addElement(table)
-    doc.save(str(out_dir / f"{timestamp}_summary.ods"))

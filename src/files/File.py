@@ -1,10 +1,13 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from odf import text, teletype
 from odf.opendocument import load
+
+from logger import logger
 
 PLAIN_TEXT_EXTENSIONS = {".txt", ".rtf", ".md"}
 ODF_EXTENSIONS = {".odt", ".ods", ".odp", ".odg", ".odc", ".odf", ".odi", ".odm"}
@@ -91,3 +94,68 @@ def _read_odf_content(file_path: str) -> str:
     doc = load(file_path)
     paragraphs = doc.getElementsByType(text.P)
     return "\n".join(teletype.extractText(p) for p in paragraphs)
+
+
+def odt_to_markdown(job_path: Path) -> str:
+    """Converts an ODT file to a Markdown string using pandoc.
+
+    Args:
+        job_path (Path): Path to the .odt file.
+
+    Returns:
+        str: The file contents as GitHub-Flavoured Markdown.
+
+    Raises:
+        subprocess.CalledProcessError: If the pandoc subprocess exits with a non-zero code.
+    """
+    pandoc_path = os.environ.get("PANDOC_PATH", "pandoc")
+    return subprocess.run(
+        [pandoc_path, "--from=odt", "--to=gfm", str(job_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def convert_to_pdf(file_path: Path) -> None:
+    """Converts a file to PDF using LibreOffice in headless mode.
+
+    Reads the LibreOffice executable path from the LIBREOFFICE_PATH environment
+    variable. If the variable is not set, a warning is logged and the conversion
+    is skipped. Set LIBREOFFICE_PATH in a .env file or your shell environment:
+      - Windows example: C:\\Program Files\\LibreOffice\\program\\soffice.exe
+      - Unix example:    libreoffice
+
+    Args:
+        file_path (Path): Path to the file to convert. The resulting PDF is
+            placed in the same directory.
+
+    Raises:
+        subprocess.CalledProcessError: If LibreOffice exits with a non-zero
+            return code.
+    """
+    libreoffice_path = os.environ.get("LIBREOFFICE_PATH")
+    if not libreoffice_path:
+        logger.warning(
+            "LIBREOFFICE_PATH is not set — skipping PDF conversion for '%s'.",
+            file_path.name,
+        )
+        return
+    try:
+        subprocess.run(
+            [
+                libreoffice_path,
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(file_path.parent),
+                str(file_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logger.info("Converted '%s' to PDF.", file_path.name)
+    except subprocess.CalledProcessError as e:
+        logger.error("PDF conversion failed for '%s': %s", file_path.name, e.stderr)
