@@ -4,6 +4,8 @@ from jobspy import DescriptionFormat, JobType, Site, Country
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from files.File import read_file_content, validate_file
+from apis.fetchers import BaseFetcher, JobspyFetcher
+
 
 _VALID_SITE_NAMES: frozenset[str] = frozenset(s.value for s in Site)
 _VALID_JOB_TYPES: frozenset[str] = frozenset(jt.value[0] for jt in JobType)
@@ -263,10 +265,22 @@ class APICalls(BaseModel):
     Attributes:
         tool (str): Identifier of the tool to use (e.g. "jobspy").
         args (JobspyArgs): Arguments to pass to the tool.
+        fetcher (BaseFetcher): Instantiated fetcher for this API call.
     """
 
     tool: str
-    args: JobspyArgs
+    args: Union[JobspyArgs]
+    fetcher: BaseFetcher = None
+
+    @model_validator(mode="after")
+    def set_fetcher(self) -> "APICalls":
+        """Initializes the fetcher field based on tool and args."""
+        if self.tool == "jobspy":
+            self.fetcher = JobspyFetcher(self.args)
+        # Add more tools here as needed
+        else:
+            raise ValueError(f"No fetcher registered for tool '{self.tool}'.")
+        return self
 
 
 class Config(BaseModel):

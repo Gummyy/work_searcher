@@ -2,14 +2,14 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from langchain_ollama import ChatOllama
 from odf import teletype, text
 from odf.opendocument import OpenDocumentSpreadsheet, OpenDocumentText, load
 from odf.table import Table, TableCell, TableRow
 
 from agents.types import ParsedJob, RankingOutput, ScoringInput
-from config.types import FileOrContent
-from files.File import ODF_EXTENSIONS
+from config.types import Document, FileOrContent
+from files.File import ODF_EXTENSIONS, convert_to_pdf
+from logger import logger
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 SCORING_SYSTEM_PROMPT = (_PROMPTS_DIR / "scoring_system_prompt.md").read_text(
@@ -71,14 +71,59 @@ def copy_or_write(doc_field: FileOrContent, dest_path: Path) -> None:
         doc.save(str(dest_path))
 
 
+def extract_cover_last_paragraph(cover_content: str) -> str | None:
+    """Extracts the last non-empty paragraph from plain-text cover letter content.
+
+    Args:
+        cover_content (str): Plain-text content of the cover letter.
+
+    Returns:
+        str | None: The last non-empty paragraph, or None if the content is blank.
+    """
+    return next((p for p in reversed(cover_content.split("\n")) if p.strip()), None)
+
+
+def write_job_output(
+    job_dir: Path,
+    doc: Document,
+    rewritten_closing: str | None,
+) -> None:
+    """Writes resume and cover letter files into a job output directory.
+
+    Creates the directory, copies or writes the resume and cover letter for
+    the given document category, then replaces the cover letter's last paragraph
+    with the pre-computed rewrite (if provided). Converts both documents to PDF.
+
+    Args:
+        job_dir (Path): Target directory for the job output files.
+        doc (Document): Document category bundle containing resume and cover letter.
+        rewritten_closing (str | None): Pre-computed replacement for the cover
+            letter's last paragraph. Skipped when None.
+    """
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    resume_dest = job_dir / dest_name(doc.resume, "resume")
+    copy_or_write(doc.resume, resume_dest)
+    convert_to_pdf(resume_dest)
+
+    cover_dest = job_dir / dest_name(doc.cover_letter, "cover_letter")
+    copy_or_write(doc.cover_letter, cover_dest)
+    if rewritten_closing is not None:
+        write_last_paragraph(cover_dest, rewritten_closing)
+    convert_to_pdf(cover_dest)
+
+
 def write_summary_ods(
-    out_dir: Path, parsed_jobs: list[ParsedJob], rankings: list[RankingOutput]
+    out_dir: Path,
+    parsed_jobs: list[ParsedJob],
+    rankings: list[RankingOutput],
 ) -> None:
     """Writes a summary ODS spreadsheet with one row per ranked job.
 
     Columns: job_title (A), company (B), job_url (C), candidate_rank (D),
     candidate_explanation (E), offering_rank (F), offering_explanation (G),
-    related_category (H), final_rank (I, formula: =0.5*(D{row}+F{row})).
+    related_category (H), final_rank (I, formula: =0.5*(D{row}+F{row})),
+    status (J).
     The file is named '{DATETIME}_summary.ods' and placed directly in out_dir.
 
     Args:
@@ -101,6 +146,7 @@ def write_summary_ods(
         "offering_explanation",
         "related_category",
         "final_rank",
+        "status",
     ]
     header_row = TableRow()
     for h in headers:
@@ -152,27 +198,29 @@ def write_summary_ods(
             )
         )
 
+        cell = TableCell(valuetype="string", stringvalue=ranking.status)
+        cell.addElement(text.P(text=ranking.status))
+        data_row.addElement(cell)
+
         table.addElement(data_row)
 
     doc.spreadsheet.addElement(table)
-    doc.save(str(out_dir / f"{timestamp}_summary.ods"))
+    summary_path = out_dir / f"{timestamp}_summary.ods"
+    if summary_path.exists():
+        logger.warning(f"Summary file '{summary_path}' already exists — overwriting.")
+    doc.save(str(summary_path))
 
 
-def rewrite_last_paragraph(
-    cover_path: Path, job_description: str, model_name: str
-) -> None:
-    """Rewrites the last non-empty paragraph of a cover letter file using an LLM.
+def write_last_paragraph(cover_path: Path, new_text: str) -> None:
+    """Replaces the last non-empty paragraph of a cover letter file with new_text.
 
     For ODT files, edits the document in-place using odfpy. For plain text
     files, replaces the last non-empty line in-place.
 
     Args:
         cover_path (Path): Path to the cover letter file to edit.
-        job_description (str): Job description passed as context to the LLM.
-        model_name (str): Ollama model identifier to use for the rewrite.
+        new_text (str): Replacement text for the last paragraph.
     """
-    llm = ChatOllama(model=model_name)
-
     if cover_path.suffix.lower() in ODF_EXTENSIONS:
         doc = load(str(cover_path))
         paragraphs = doc.getElementsByType(text.P)
@@ -182,7 +230,6 @@ def rewrite_last_paragraph(
         )
         if last_p is None:
             return
-        new_text = _call_rewrite_llm(llm, job_description, teletype.extractText(last_p))
         for child in list(last_p.childNodes):
             last_p.removeChild(child)
         last_p.addText(new_text)
@@ -195,29 +242,5 @@ def rewrite_last_paragraph(
         )
         if last_idx is None:
             return
-        lines[last_idx] = _call_rewrite_llm(llm, job_description, lines[last_idx])
+        lines[last_idx] = new_text
         cover_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _call_rewrite_llm(
-    llm: ChatOllama, job_description: str, last_paragraph: str
-) -> str:
-    """Calls the LLM to rewrite a cover letter closing paragraph.
-
-    Args:
-        llm (ChatOllama): The LLM instance to use.
-        job_description (str): The job description for context.
-        last_paragraph (str): The current closing paragraph to rewrite.
-
-    Returns:
-        str: The rewritten paragraph text.
-    """
-    # TODO: move to a dedicated prompt file in prompts/ when content is finalised.
-    message = (
-        f"Job description:\n{job_description}\n\n"
-        f"Current closing paragraph:\n{last_paragraph}\n\n"
-        "Rewrite this closing paragraph to express genuine and specific interest "
-        "in this company and role. Keep it concise and professional. "
-        "Return only the rewritten paragraph text, without any preamble."
-    )
-    return llm.invoke([("human", message)]).content

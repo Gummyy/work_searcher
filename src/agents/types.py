@@ -1,8 +1,9 @@
+import operator
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, create_model
-from typing_extensions import TypedDict
+from typing_extensions import Annotated, NotRequired, TypedDict
 
 from config.types import APICalls, Document
 
@@ -37,6 +38,9 @@ class RankingOutput(BaseModel):
     Attributes:
         candidate_rank (RankScore): How well the candidate's profile matches the job offering.
         offering_rank (RankScore): How well the job offering matches the candidate's preferences.
+        related_category (str): Document category most relevant to the job offering.
+        status (str): Output status set by the pipeline after writing ('created', 'updated',
+            'skipped', or 'aborted'). Defaults to 'skipped'; never set by the LLM.
     """
 
     candidate_rank: RankScore = Field(
@@ -53,6 +57,9 @@ class RankingOutput(BaseModel):
         description=(
             _PROMPTS_DIR / "ranking_output_related_category_description.md"
         ).read_text(encoding="utf-8")
+    )
+    status: Literal["created", "updated", "skipped", "aborted"] = Field(
+        default="skipped"
     )
 
 
@@ -105,6 +112,59 @@ class ScoringInput(BaseModel):
     document_categories: list[Document]
 
 
+class CoverRewriteJob(TypedDict):
+    """Data for a single cover letter rewrite passed to a rewrite batch node.
+
+    Attributes:
+        job_idx (int): Index of the corresponding entry in parsed_jobs / rankings.
+        job_description (str): Job description used as context for the LLM rewrite.
+        cover_content (str): Plain-text content of the cover letter to rewrite.
+    """
+
+    job_idx: int
+    job_description: str
+    cover_content: str
+
+
+class ScoringJob(TypedDict):
+    """A single job scoring task dispatched by the scoring router.
+
+    Attributes:
+        job_idx (int): Index of the job in the original parsed_jobs list, used to
+            restore ordering after parallel execution.
+        parsed_job (ParsedJob): The fully parsed job to be scored.
+    """
+
+    job_idx: int
+    parsed_job: ParsedJob
+
+
+class ScoredOffering(TypedDict):
+    """A successfully scored job pairing a parsed entry with its ranking result.
+
+    Attributes:
+        job_idx (int): Original index in parsed_jobs, used for stable re-ordering.
+        parsed_job (ParsedJob): The parsed job offering.
+        ranking (RankingOutput): The LLM scoring result.
+    """
+
+    job_idx: int
+    parsed_job: ParsedJob
+    ranking: RankingOutput
+
+
+class CoverRewriteResult(TypedDict):
+    """A rewritten cover letter closing paragraph for a single job.
+
+    Attributes:
+        job_idx (int): Index of the corresponding entry in parsed_jobs / rankings.
+        rewritten_paragraph (str): The LLM-rewritten closing paragraph.
+    """
+
+    job_idx: int
+    rewritten_paragraph: str
+
+
 class PipelineState(TypedDict):
     """Full state of the pipeline agent throughout its execution.
 
@@ -121,8 +181,17 @@ class PipelineState(TypedDict):
             when --job_url is used; otherwise filled by fetch_jobs_node.
         parsed_jobs (list[ParsedJob]): Full job records. Pre-populated when
             --job is used; otherwise filled by scrape_node.
-        rankings (list[RankingOutput]): One ranking per scored job offering.
-            Empty until score_all_node runs.
+        rankings (list[RankingOutput]): One ranking per scored job offering,
+            aligned 1-to-1 with parsed_jobs. Empty until score_all runs.
+        cover_rewrite_batch (list[CoverRewriteJob]): Batch of jobs whose cover
+            letter closing must be rewritten. Set per-Send by _route_rewrites.
+        cover_rewrites (list[CoverRewriteResult]): Rewritten cover letter closings.
+            Accumulated across parallel rewrite_cover_batch nodes.
+        scoring_jobs (list[ScoringJob]): Batch of scoring tasks dispatched per-Send
+            by _route_scoring. Each entry holds a job index and parsed job.
+        scored_offerings (list[ScoredOffering]): Successfully scored offerings
+            accumulated across parallel score_batch_of_offerings nodes.
+        cancelled (bool): True when the user chose to abort output writing.
     """
 
     profile: str
@@ -130,9 +199,15 @@ class PipelineState(TypedDict):
     document_categories: list[Document]
     api_calls: list[APICalls]
     out_dir: Path
-    job_rows: list[JobRow]
+    job_rows: Annotated[list[JobRow], operator.add]
     parsed_jobs: list[ParsedJob]
     rankings: list[RankingOutput]
+    api_call: NotRequired[APICalls]
+    cover_rewrite_batch: NotRequired[list[CoverRewriteJob]]
+    cover_rewrites: NotRequired[Annotated[list[CoverRewriteResult], operator.add]]
+    scoring_jobs: NotRequired[list[ScoringJob]]
+    scored_offerings: NotRequired[Annotated[list[ScoredOffering], operator.add]]
+    cancelled: NotRequired[bool]
 
 
 def build_ranking_output(scoring_input: ScoringInput) -> type[BaseModel]:
