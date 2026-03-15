@@ -1,6 +1,6 @@
 from typing import Optional, Union
 
-from jobspy import DescriptionFormat, JobType, Site, Country
+from jobspy import JobType, Site, Country
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from files.File import read_file_content, validate_file
@@ -9,9 +9,6 @@ from apis.fetchers import BaseFetcher, JobspyFetcher
 
 _VALID_SITE_NAMES: frozenset[str] = frozenset(s.value for s in Site)
 _VALID_JOB_TYPES: frozenset[str] = frozenset(jt.value[0] for jt in JobType)
-_VALID_DESCRIPTION_FORMATS: frozenset[str] = frozenset(
-    d.value for d in DescriptionFormat
-)
 
 
 class FileOrContent(BaseModel):
@@ -236,26 +233,6 @@ class JobspyArgs(BaseModel):
             str: The original country string.
         """
         Country.from_string(v)
-        return v
-
-    @field_validator("description_format")
-    @classmethod
-    def validate_description_format(cls, v: str) -> str:
-        """Validates that description_format is a recognized format string.
-
-        Args:
-            v (str): The format string to validate.
-
-        Raises:
-            ValueError: If the string is not a valid DescriptionFormat value.
-
-        Returns:
-            str: The validated format string.
-        """
-        if v not in _VALID_DESCRIPTION_FORMATS:
-            raise ValueError(
-                f"Invalid description_format '{v}'. Valid values: {sorted(_VALID_DESCRIPTION_FORMATS)}"
-            )
         return v
 
 
