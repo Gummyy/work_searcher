@@ -8,7 +8,7 @@ from odf.table import Table, TableCell, TableRow
 
 from agents.types import ParsedJob, RankingOutput, ScoringInput
 from config.types import Document, FileOrContent
-from files.File import ODF_EXTENSIONS, convert_to_pdf
+from files.utils import ODF_EXTENSIONS, convert_to_pdf
 from logger import logger
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -103,14 +103,26 @@ def write_job_output(
     job_dir.mkdir(parents=True, exist_ok=True)
 
     resume_dest = job_dir / dest_name(doc.resume, "resume")
-    copy_or_write(doc.resume, resume_dest)
-    convert_to_pdf(resume_dest)
+    try:
+        copy_or_write(doc.resume, resume_dest)
+    except Exception as e:
+        logger.error(f"Failed to copy or write resume to '{resume_dest}': {e}")
+    try:
+        convert_to_pdf(resume_dest)
+    except Exception as e:
+        logger.error(f"Failed to convert resume to PDF for '{resume_dest}': {e}")
 
     cover_dest = job_dir / dest_name(doc.cover_letter, "cover_letter")
-    copy_or_write(doc.cover_letter, cover_dest)
+    try:
+        copy_or_write(doc.cover_letter, cover_dest)
+    except Exception as e:
+        logger.error(f"Failed to copy or write cover letter to '{cover_dest}': {e}")
     if rewritten_closing is not None:
         write_last_paragraph(cover_dest, rewritten_closing)
-    convert_to_pdf(cover_dest)
+    try:
+        convert_to_pdf(cover_dest)
+    except Exception as e:
+        logger.error(f"Failed to convert cover letter to PDF for '{cover_dest}': {e}")
 
 
 def write_summary_ods(

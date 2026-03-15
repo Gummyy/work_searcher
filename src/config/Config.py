@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 
 from config.types import Config as ConfigModel
-from files.File import read_json_file, validate_file
+from files.utils import read_json_file, validate_file
 
 
 class Config:

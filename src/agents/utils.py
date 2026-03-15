@@ -2,7 +2,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from agents.types import JobRow, ParsedJob
-from files.File import ODF_EXTENSIONS, odt_to_markdown, read_file_content, validate_file
+from files.utils import read_file_content, validate_file
 
 # Maps URL hostname substrings to the corresponding scraper key.
 _URL_SITE_MAP: dict[str, str] = {
@@ -35,19 +35,29 @@ def build_parsed_jobs(job_paths: list[str]) -> list[ParsedJob]:
                 f"Job file name must follow the '$COMPANY__$JOB_TITLE' convention, got: '{stem}'."
             )
         company, job_title = stem.split("__", 1)
-        validate_file(job_path_str)
-        if job_path.suffix.lower() in ODF_EXTENSIONS:
-            job_description = odt_to_markdown(job_path)
-        else:
+        try:
+            validate_file(job_path_str)
+        except ValueError as e:
+            raise ValueError(f"Error with file '{job_path_str}': {e}") from e
+        try:
             job_description = read_file_content(job_path_str)
-        parsed_jobs.append(
-            ParsedJob(
-                company=company,
-                job_title=job_title,
-                job_description=job_description,
-                job_url=job_path_str,
+        except Exception as e:
+            raise ValueError(
+                f"Failed to read content from '{job_path_str}': {e}"
+            ) from e
+        try:
+            parsed_jobs.append(
+                ParsedJob(
+                    company=company,
+                    job_title=job_title,
+                    job_description=job_description,
+                    job_url=job_path_str,
+                )
             )
-        )
+        except Exception as e:
+            raise ValueError(
+                f"Failed to create ParsedJob for '{job_path_str}': {e}"
+            ) from e
     return parsed_jobs
 
 

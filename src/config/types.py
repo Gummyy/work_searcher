@@ -3,7 +3,7 @@ from typing import Optional, Union
 from jobspy import JobType, Site, Country
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from files.File import read_file_content, validate_file
+from files.utils import read_file_content, validate_file
 from apis.fetchers import BaseFetcher, JobspyFetcher
 
 
@@ -60,7 +60,12 @@ class FileOrContent(BaseModel):
         if self.file is None and self.content is None:
             raise ValueError("At least one of 'file' or 'content' must be provided.")
         if self.content is None:
-            self.content = read_file_content(self.file)
+            try:
+                self.content = read_file_content(self.file)
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to read content from file '{self.file}': {e}"
+                ) from e
         if not self.content.strip():
             raise ValueError("'content' must not be empty.")
         return self
