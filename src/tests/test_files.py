@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from files.File import validate_file, read_file_content, read_json_file
+from files.utils import read_file_content, read_json_file, validate_file
+
+FILES_DIR = Path(__file__).parent / "files"
 
 
 def test_validate_file(tmp_path: Path):
@@ -39,13 +41,29 @@ def test_validate_file(tmp_path: Path):
     os.chmod(unreadable_file, stat.S_IREAD | stat.S_IWRITE)
 
 
-def test_read_file_content(tmp_path: Path):
-    # Plain text
-    txt_file = tmp_path / "doc.md"
-    txt_file.write_text("Markdown **content**", encoding="utf-8")
-    assert read_file_content(str(txt_file)) == "Markdown **content**"
+def test_read_file_content_md():
+    """Test that a .md file is converted to GFM with expected content."""
+    output = read_file_content(str(FILES_DIR / "sample.md"))
+    assert "Title" in output
+    assert "bold" in output
 
-    # Unsupported extension
+
+def test_read_file_content_html():
+    """Test that a .html file is converted to GFM with expected content."""
+    output = read_file_content(str(FILES_DIR / "sample.html"))
+    assert "Title" in output
+    assert "bold" in output
+
+
+def test_read_file_content_odt():
+    """Test that a .odt file is converted to GFM with expected content."""
+    output = read_file_content(str(FILES_DIR / "sample.odt"))
+    assert "My big project" in output
+    assert "awesome" in output
+
+
+def test_read_file_content_unsupported(tmp_path: Path):
+    """Test that an unsupported file extension raises ValueError."""
     unsupported_file = tmp_path / "doc.xyz"
     unsupported_file.write_text("xyz")
     with pytest.raises(ValueError, match="Unsupported file extension"):
