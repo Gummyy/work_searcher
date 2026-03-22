@@ -37,7 +37,13 @@ To set up the environment:
     pip install -r requirements.txt
     ```
 
-3.  Configure environment variables in `.env`.
+3.  Configure environment variables in `.env`. In order to support multiple file extensions and to be able convert these to markdown (for llm inferences) and pdf (the final versions to be sent to employers), it is necessary to install [pandoc](https://pandoc.org) and eventually [libreoffice](https://www.libreoffice.org) for some specific extensions. Once these are installed, `PANDOC_PATH` and `LIBREOFFICE_PATH` are set up as the paths to both executables.
+
+4.  Install a PDF engine for pandoc. Pandoc requires a PDF engine to produce PDF files from markdown. Any [pandoc-supported engine](https://pandoc.org/MANUAL.html#option--pdf-engine) can be used. [Tectonic](https://tectonic-typesetting.github.io) is recommended: it is a single lightweight binary (~18 MB) that silently downloads only the packages it needs on first use, with no interactive prompts — making it well-suited for subprocess execution.
+
+    Download the prebuilt Windows binary from the [Tectonic GitHub releases](https://github.com/tectonic-typesetting/tectonic/releases) (`x86_64-pc-windows-msvc` variant), place it somewhere on your `PATH`, then set `PANDOC_PDF_ENGINE=tectonic` in your `.env` file.
+
+    If `PANDOC_PDF_ENGINE` is not set, pandoc falls back to its default engine (`pdflatex`), which requires a full TeX distribution (MiKTeX or TeX Live) to be installed.
 
 ## Tests
 

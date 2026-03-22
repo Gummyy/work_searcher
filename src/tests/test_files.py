@@ -3,9 +3,13 @@ import os
 import stat
 from pathlib import Path
 
+from dotenv import load_dotenv
 import pytest
 
-from files.utils import read_file_content, read_json_file, validate_file
+from files.utils import read_file_content, read_json_file, validate_file, convert_to_pdf
+
+
+load_dotenv()
 
 FILES_DIR = Path(__file__).parent / "files"
 
@@ -82,3 +86,21 @@ def test_read_json_file(tmp_path: Path):
     invalid_file.write_text("Not JSON")
     with pytest.raises(ValueError, match="Error decoding JSON from file"):
         read_json_file(str(invalid_file))
+
+
+def test_convert_to_pdf(tmp_path: Path):
+    # Create a simple markdown file
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# Hello World\nThis is a test.", encoding="utf-8")
+
+    # Convert to PDF
+    pdf_file = tmp_path / "test.pdf"
+    convert_to_pdf(str(md_file), str(pdf_file))
+
+    # Check that the PDF file was created
+    assert pdf_file.exists()
+
+    odt_file = FILES_DIR / "sample.odt"
+    pdf_file2 = tmp_path / "sample.pdf"
+    convert_to_pdf(str(odt_file), str(pdf_file2))
+    assert pdf_file2.exists()
