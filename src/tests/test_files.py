@@ -59,6 +59,13 @@ def test_read_file_content_html():
     assert "bold" in output
 
 
+def test_read_file_content_txt():
+    """Test that a .txt file is converted to GFM with expected content."""
+    output = read_file_content(str(FILES_DIR / "sample.txt"))
+    assert "Sample Title" in output
+    assert "plain text content" in output
+
+
 def test_read_file_content_odt():
     """Test that a .odt file is converted to GFM with expected content."""
     output = read_file_content(str(FILES_DIR / "sample.odt"))
@@ -104,3 +111,30 @@ def test_convert_to_pdf(tmp_path: Path):
     pdf_file2 = tmp_path / "sample.pdf"
     convert_to_pdf(str(odt_file), str(pdf_file2))
     assert pdf_file2.exists()
+
+
+def test_convert_to_pdf_default_path(tmp_path: Path):
+    """Test that convert_to_pdf saves alongside the source when new_path is omitted."""
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# Hello World\nThis is a test.", encoding="utf-8")
+    convert_to_pdf(str(md_file))
+    assert (tmp_path / "test.pdf").exists()
+
+
+def test_convert_to_pdf_unrecognized_extension(tmp_path: Path):
+    """Test that ValueError is raised for unrecognized file extensions."""
+    unknown_file = tmp_path / "test.xyz"
+    unknown_file.write_text("content", encoding="utf-8")
+    with pytest.raises(ValueError, match="Unrecognized extension"):
+        convert_to_pdf(str(unknown_file))
+
+
+def test_read_file_content_pandoc_path_unset(tmp_path: Path, monkeypatch):
+    """Test that EnvironmentError is raised when PANDOC_PATH is not set."""
+    monkeypatch.delenv("PANDOC_PATH", raising=False)
+    test_file = tmp_path / "test.md"
+    test_file.write_text("# Title", encoding="utf-8")
+    with pytest.raises(
+        EnvironmentError, match="PANDOC_PATH environment variable is not set"
+    ):
+        read_file_content(str(test_file))

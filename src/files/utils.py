@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 ODF_EXTENSIONS = {".odt", ".ods", ".odp", ".odg", ".odc", ".odf", ".odi", ".odm"}
 PANDOC_SUPPORTED_EXTENSIONS = {
-    ".txt": "plain",
+    ".txt": "markdown",
     ".rtf": "rtf",
     ".md": "markdown",
     ".html": "html",

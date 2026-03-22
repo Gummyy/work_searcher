@@ -13,6 +13,12 @@ from config.types import (
     APICalls,
     Config as ConfigModel,
 )
+from apis.fetchers import JobspyFetcher
+
+# dotenv
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def test_file_or_content_validators(tmp_path: Path):
@@ -27,7 +33,7 @@ def test_file_or_content_validators(tmp_path: Path):
 
     foc_file = FileOrContent(file=str(test_file))
     assert foc_file.file == str(test_file)
-    assert foc_file.content == "Hello file"
+    assert "Hello file" in foc_file.content
 
     # Test failing conditions
     with pytest.raises(
@@ -43,19 +49,33 @@ def test_file_or_content_validators(tmp_path: Path):
     with pytest.raises(ValueError, match="'content' must not be empty"):
         FileOrContent(file=str(test_empty_file))
 
+    # Test that a non-existent file path fails field validation
+    with pytest.raises(ValidationError, match="File does not exist"):
+        FileOrContent(file=str(tmp_path / "nonexistent.txt"))
+
+    # Test that when both are provided, content takes precedence over the file
+    foc_both = FileOrContent(file=str(test_file), content="Override content")
+    assert foc_both.content == "Override content"
+
 
 def test_jobspy_args_validators():
     # Test normalization to list
-    args = JobspyArgs(
+    valid_jobspy_args = JobspyArgs(
         site_name="linkedin",
         search_terms="engineer",
         location="NY",
         job_type="fulltime",
     )
-    assert args.site_name == ["linkedin"]
-    assert args.search_terms == ["engineer"]
-    assert args.location == ["NY"]
-    assert args.job_type == ["fulltime"]
+    assert valid_jobspy_args.site_name == ["linkedin"]
+    assert valid_jobspy_args.search_terms == ["engineer"]
+    assert valid_jobspy_args.location == ["NY"]
+    assert valid_jobspy_args.job_type == ["fulltime"]
+
+    valid_api_calls = APICalls(tool="jobspy", args=valid_jobspy_args)
+    assert isinstance(
+        valid_api_calls.fetcher,
+        JobspyFetcher,
+    )
 
     # Test invalid site
     with pytest.raises(ValidationError, match="Invalid site_name 'invalid_site'"):
@@ -72,6 +92,45 @@ def test_jobspy_args_validators():
             job_type=["fulltime", "random"],
         )
 
+    # Test unimplemented tool use
+    with pytest.raises(
+        ValidationError, match="No fetcher registered for tool 'unimplemented_tool'."
+    ):
+        APICalls(tool="unimplemented_tool", args=valid_jobspy_args)
+
+    # Test invalid country_indeed
+    with pytest.raises(ValidationError):
+        JobspyArgs(
+            site_name=["linkedin"],
+            search_terms=["a"],
+            location=["b"],
+            country_indeed="notacountry",
+        )
+
+    # Test numeric field constraint violations
+    with pytest.raises(ValidationError):
+        JobspyArgs(
+            site_name=["linkedin"], search_terms=["a"], location=["b"], results_wanted=0
+        )
+    with pytest.raises(ValidationError):
+        JobspyArgs(
+            site_name=["linkedin"], search_terms=["a"], location=["b"], offset=-1
+        )
+    with pytest.raises(ValidationError):
+        JobspyArgs(
+            site_name=["linkedin"], search_terms=["a"], location=["b"], verbose=3
+        )
+
+    # Test that list inputs pass through the normalizer unchanged
+    list_args = JobspyArgs(
+        site_name=["linkedin", "indeed"],
+        search_terms=["engineer", "developer"],
+        location=["NY", "CA"],
+    )
+    assert list_args.site_name == ["linkedin", "indeed"]
+    assert list_args.search_terms == ["engineer", "developer"]
+    assert list_args.location == ["NY", "CA"]
+
 
 def test_config_model_validators():
     # Test duplicate categories
@@ -85,6 +144,12 @@ def test_config_model_validators():
         ValidationError, match="Document categories must be unique across documents."
     ):
         ConfigModel(profile=foc, preferences=foc, documents=[doc1, doc2])
+
+    # No documents provided
+    with pytest.raises(
+        ValidationError, match="At least one document must be provided."
+    ):
+        ConfigModel(profile=foc, preferences=foc, documents=[])
 
 
 def test_config_loader(tmp_path: Path):
@@ -108,6 +173,27 @@ def test_config_loader(tmp_path: Path):
     model = config.get_config()
     assert model.profile.content == "profile text"
     assert len(model.documents) == 1
+
+    # Test config with api_calls populated
+    valid_data_with_api = {
+        **valid_data,
+        "api_calls": [
+            {
+                "tool": "jobspy",
+                "args": {
+                    "site_name": ["linkedin"],
+                    "search_terms": ["engineer"],
+                    "location": ["NY"],
+                },
+            }
+        ],
+    }
+    config_file_with_api = tmp_path / "config_api.json"
+    config_file_with_api.write_text(json.dumps(valid_data_with_api), encoding="utf-8")
+    model_with_api = Config(str(config_file_with_api)).get_config()
+    assert model_with_api.api_calls is not None
+    assert len(model_with_api.api_calls) == 1
+    assert isinstance(model_with_api.api_calls[0].fetcher, JobspyFetcher)
 
 
 def test_config_loader_errors(tmp_path: Path):

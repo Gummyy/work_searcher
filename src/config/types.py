@@ -1,7 +1,7 @@
 from typing import Optional, Union
 
 from jobspy import JobType, Site, Country
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from files.utils import read_file_content, validate_file
 from apis.fetchers import BaseFetcher, JobspyFetcher
@@ -250,9 +250,11 @@ class APICalls(BaseModel):
         fetcher (BaseFetcher): Instantiated fetcher for this API call.
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     tool: str
     args: Union[JobspyArgs]
-    fetcher: BaseFetcher = None
+    fetcher: Optional[BaseFetcher] = None
 
     @model_validator(mode="after")
     def set_fetcher(self) -> "APICalls":
@@ -294,4 +296,6 @@ class Config(BaseModel):
         categories = [doc.category for doc in self.documents]
         if len(categories) != len(set(categories)):
             raise ValueError("Document categories must be unique across documents.")
+        if len(categories) == 0:
+            raise ValueError("At least one document must be provided.")
         return self
